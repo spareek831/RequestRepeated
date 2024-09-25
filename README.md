@@ -13,7 +13,7 @@ The script takes in certain flags as well for ease of use, they are
 
 ```-n``` (int): Number of requests to repeat, defaults to 1000.
 
-```-url``` (string): URL to call, defaults to http://localhost:8090/api/1/rest/feed/run/task/snaplogic/projects/shared/%20new%20pipeline%200%20Task12.
+```-url``` (string): URL to call (required).
 
 ```-method``` (string): HTTP method to use, defaults to POST.
 
