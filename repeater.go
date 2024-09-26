@@ -15,7 +15,7 @@ func main() {
 	url := flag.String("url", "", "URL to call")
 	httpMethod := flag.String("method", "POST", "URL to call, defaults to POST request")
 	token := flag.String("token", "", "Bearer token for authorization")
-	delay := flag.Int("delay", 10, "Delay in milliseconds between each request, defaults to 1000ms")
+	delay := flag.Int("delay", 10, "Delay in milliseconds between each request, defaults to 10ms")
 
 	flag.Parse()
 
@@ -30,14 +30,14 @@ func main() {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			
+
 			client := &http.Client{}
 			req, err := http.NewRequest(*httpMethod, *url, nil)
 			if err != nil {
 				fmt.Printf("err in forming request %d err is %s\n ", i, err)
 				return
 			}
-			
+
 			req.Header.Add("Authorization", "Bearer "+*token)
 			res, err := client.Do(req)
 			if err != nil {
@@ -51,7 +51,7 @@ func main() {
 				fmt.Println(err)
 				return
 			}
-			
+
 			fmt.Printf("request %d body is \n %s", i, string(body))
 		}(i)
 		if *delay > 0 {
