@@ -13,12 +13,14 @@ import (
 
 func main() {
 	start := time.Now()
-	numRequests := flag.Int("n", 1000, "Number of requests to repeat")
+	numRequests := flag.Int("n", 1, "Number of requests to repeat")
 	url := flag.String("url", "", "URL to call")
 	httpMethod := flag.String("method", "POST", "HTTP method, defaults to POST")
 	token := flag.String("token", "", "Bearer token for authorization")
 	delay := flag.Int("delay", 100, "Delay in milliseconds between each request")
 	randomizeDelay := flag.Int("randomizeNoDelay", -1, "Percentage of requests to be made immediately without delay")
+	requestDuration := flag.Int("requestDuration", -1, "Run requests for the given number of minutes")
+	numThreads := flag.Int("numThreads", 20, "Number of threads to use when running for a specified duration")
 
 	flag.Parse()
 
@@ -48,23 +50,28 @@ func main() {
 		}
 	}()
 
-	for i := 0; i < *numRequests; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	// Function to perform the request
+	makeRequest := func(threadID int, numRequest int) {
+		defer wg.Done()
+		client := &http.Client{}
+		for {
+			if *requestDuration > 0 && time.Since(start).Minutes() >= float64(*requestDuration) {
+				return // Exit if the time duration is complete
+			} else if *requestDuration == 0 && numRequest == 0 {
+				break
+			}
 
 			tStart := time.Now()
-			client := &http.Client{}
 			req, err := http.NewRequest(*httpMethod, *url, nil)
 			if err != nil {
-				fmt.Printf("Error in forming request %d: %s\n", i, err)
+				fmt.Printf("Error forming request in thread %d: %s\n", threadID, err)
 				return
 			}
 
 			req.Header.Add("Authorization", "Bearer "+*token)
 			res, err := client.Do(req)
 			if err != nil {
-				fmt.Printf("Error from upstream in request %d: %s\n", i, err)
+				fmt.Printf("Error from upstream in thread %d: %s\n", threadID, err)
 				return
 			}
 			defer res.Body.Close()
@@ -76,13 +83,30 @@ func main() {
 			}
 
 			durationChan <- time.Since(tStart)
-			fmt.Printf("request %d body is \n %s", i, string(body))
-		}(i)
+			fmt.Printf("Thread %d response:\n%s\n", threadID, string(body))
 
-		if *delay > 0 && *randomizeDelay <= 0 {
-			time.Sleep(time.Duration(*delay) * time.Millisecond)
-		} else if *delay > 0 && rand.Intn(100) > *randomizeDelay {
-			time.Sleep(time.Duration(*delay) * time.Millisecond)
+			// Handle delay and randomization
+			if *delay > 0 && (*randomizeDelay <= 0 || rand.Intn(100) > *randomizeDelay) {
+				time.Sleep(time.Duration(*delay) * time.Millisecond)
+			}
+
+			if *requestDuration != 0 {
+				numRequest -= 1
+			}
+		}
+	}
+
+	if *requestDuration > 0 {
+		// Run for a specified duration using multiple threads
+		for i := 0; i < *numThreads; i++ {
+			wg.Add(1)
+			go makeRequest(i, 0)
+		}
+	} else {
+		// Run a fixed number of requests
+		for i := 0; i < *numRequests; i++ {
+			wg.Add(1)
+			go makeRequest(i, 1)
 		}
 	}
 
