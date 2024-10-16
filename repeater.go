@@ -50,64 +50,15 @@ func main() {
 		}
 	}()
 
-	// Function to perform the request
-	makeRequest := func(threadID int, numRequest int) {
-		defer wg.Done()
-		client := &http.Client{}
-		for {
-			if *requestDuration > 0 && time.Since(start).Minutes() >= float64(*requestDuration) {
-				return // Exit if the time duration is complete
-			} else if *requestDuration == 0 && numRequest == 0 {
-				break
-			}
-
-			tStart := time.Now()
-			req, err := http.NewRequest(*httpMethod, *url, nil)
-			if err != nil {
-				fmt.Printf("Error forming request in thread %d: %s\n", threadID, err)
-				return
-			}
-
-			req.Header.Add("Authorization", "Bearer "+*token)
-			res, err := client.Do(req)
-			if err != nil {
-				fmt.Printf("Error from upstream in thread %d: %s\n", threadID, err)
-				return
-			}
-			defer res.Body.Close()
-
-			body, err := io.ReadAll(res.Body)
-			if err != nil {
-				fmt.Println("Error reading response:", err)
-				return
-			}
-
-			durationChan <- time.Since(tStart)
-			fmt.Printf("Thread %d response:\n%s\n", threadID, string(body))
-
-			// Handle delay and randomization
-			if *delay > 0 && (*randomizeDelay <= 0 || rand.Intn(100) > *randomizeDelay) {
-				time.Sleep(time.Duration(*delay) * time.Millisecond)
-			}
-
-			if *requestDuration != 0 {
-				numRequest -= 1
-			}
-		}
-	}
-
 	if *requestDuration > 0 {
 		// Run for a specified duration using multiple threads
 		for i := 0; i < *numThreads; i++ {
 			wg.Add(1)
-			go makeRequest(i, 0)
+			go makeRequestForDuration(i, &wg, start, *requestDuration, *url, *httpMethod, *token, *delay, *randomizeDelay, durationChan)
 		}
 	} else {
 		// Run a fixed number of requests
-		for i := 0; i < *numRequests; i++ {
-			wg.Add(1)
-			go makeRequest(i, 1)
-		}
+		makeNRequest(*numRequests, *url, *httpMethod, *token, *delay, *randomizeDelay, durationChan, &wg)
 	}
 
 	wg.Wait()
@@ -129,4 +80,67 @@ func main() {
 	fmt.Println("Total Duration:", duration)
 	fmt.Println("Duration in seconds:", duration.Seconds())
 	fmt.Println("Duration in milliseconds:", duration.Milliseconds())
+}
+
+// Function to handle repeated requests for a duration
+func makeRequestForDuration(threadID int, wg *sync.WaitGroup, start time.Time,
+	requestDuration int, url, httpMethod, token string, delay, randomizeDelay int, durationChan chan time.Duration) {
+	defer wg.Done()
+	client := &http.Client{}
+
+	for {
+		// Check if the duration has been reached
+		if time.Since(start).Minutes() >= float64(requestDuration) {
+			break
+		}
+		makeHTTPRequest(threadID, client, url, httpMethod, token, delay, randomizeDelay, durationChan)
+	}
+}
+
+// Function to handle N requests with multiple threads
+func makeNRequest(numRequests int, url, httpMethod, token string, delay, randomizeDelay int, durationChan chan time.Duration, wg *sync.WaitGroup) {
+	client := &http.Client{}
+	numThreads := numRequests / 3
+
+	for i := 0; i < numThreads; i++ {
+		wg.Add(1)
+		go func(threadID int) {
+			defer wg.Done()
+			for j := 0; j < numRequests/numThreads; j++ {
+				makeHTTPRequest(threadID, client, url, httpMethod, token, delay, randomizeDelay, durationChan)
+			}
+		}(i)
+	}
+}
+
+// Function to perform the HTTP request
+func makeHTTPRequest(threadID int, client *http.Client, url, httpMethod, token string, delay, randomizeDelay int, durationChan chan time.Duration) {
+	tStart := time.Now()
+	req, err := http.NewRequest(httpMethod, url, nil)
+	if err != nil {
+		fmt.Printf("Error forming request in thread %d: %s\n", threadID, err)
+		return
+	}
+
+	req.Header.Add("Authorization", "Bearer "+token)
+	res, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Error from upstream in thread %d: %s\n", threadID, err)
+		return
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println("Error reading response:", err)
+		return
+	}
+
+	durationChan <- time.Since(tStart)
+	fmt.Printf("Thread %d response:\n%s\n", threadID, string(body))
+
+	// Handle delay and randomization
+	if delay > 0 && (randomizeDelay <= 0 || rand.Intn(100) > randomizeDelay) {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	}
 }
